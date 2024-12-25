@@ -1,0 +1,837 @@
+#Подготовка системы
+Выполняется на всех узлах master и work-нодах.
+
+1. Перво на перво обновить. Система должна быть всегда обновлена максимально
+sudo apt update
+sudo apt -y full-upgrade
+[ -f /var/run/reboot-required ] && sudo reboot -f
+
+2. Установка сопутсвующих пакетов 
+sudo apt install -y curl apt-transport-https gpg vim git
+
+3. Необходимо отключить свап
+sudo swapoff -a 
+
+4. проверка:
+$ free -h
+               total        used        free      shared  buff/cache   available
+Mem:           1,6Gi       481Mi       315Mi       1,3Mi       1,0Gi       1,1Gi
+Swap:          975Mi          0B       975Mi
+
+5. Далее коментируем запись в /etc/fstab:
+$ sudo vim /etc/fstab
+#UUID=3589935bj3333-39u4bb-24234343	none	swap	sw	0	0
+
+6. активируем необходимые модули ядра: 
+sudo tee /etc/modules-load.d/k8s.conf <<EOF
+overlay
+br_netfilter
+EOF
+
+7. Включаем IP-пересылку, чтобы позволить подам общаться друг с другом, а также пересылать трафик наружу
+echo 1 > /proc/sys/net/ipv4/ip_forward #из под root
+
+8. Включаем модули ядра:
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+9. Измените файл как показано ниже:
+sudo tee /etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+
+10. Перечитываем настройки
+sudo sysctl --system
+
+2# Install Kubeadm Bootstrapping tool
+Выполняется на всех узлах master и work-нодах.
+
+1. Добавление репозитория кубера. Ипортируем ключ:
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/cgoogle.gpg
+
+2. Добавляем репозиторий
+sudo tee /etc/apt/sources.list.d/kubernetes.list<<EOF
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+# deb-src http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+3. Обновляем пакетную базу
+sudo apt update
+
+4. Установим необходимые нам тулзы kubectl, kubeadm and kubelet:
+sudo apt install -y wget kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+5. Проверка инсталяции
+$ kubectl version --client && kubeadm version
+Client Version: v1.28.2
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+kubeadm version: &version.Info{Major:"1", Minor:"28", GitVersion:"v1.28.2", GitCommit:"89a4ea3e1e4ddd7f7572286090359983e0387b2f", GitTreeState:"clean", BuildDate:"2023-09-13T09:34:32Z", GoVersion:"go1.20.8", Compiler:"gc", Platform:"linux/amd64"}
+
+#3. Install and Configure Container Runtime
+Выполняется на всех узлах master и work-нодах.
+
+1. Ставим докер. Добавляем репу докера и ключ:
+OS=Debian_11
+CRIO_VERSION=1.27
+echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /"|sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+echo "deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$CRIO_VERSION/$OS/ /"|sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION.list
+curl -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key | sudo apt-key add -
+curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | sudo apt-key add -
+sudo apt-get update
+
+2. Установка докера:
+sudo apt-get install -y cri-o cri-o-runc
+
+
+3. Убедитесь, что служба запущена и включена:
+sudo systemctl enable crio
+sudo systemctl start crio
+sudo systemctl status crio
+
+
+
+#4. Initialize the Control Plane
+Выполняется на master-ноде
+
+1. Убедимся, что модули загружены верно:
+$ lsmod | grep br_netfilter
+br_netfilter           32768  0
+bridge                311296  1 br_netfilter
+
+2. Активируем kubelet
+sudo systemctl enable kubelet
+
+3. Следующее, что нужно сделать, — загрузить все необходимые образы контейнеров на главный узел:
+sudo kubeadm config images pull
+
+4. Начальная инициация кластера.
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --dry-run
+
+Обратите внимание на вывод команды:
+kubeadm join 172.22.1.12:6443 --token c4sog1.m1ovrecybyl3jpcc \
+	--discovery-token-ca-cert-hash sha256:1d16678e3952fdc0b89730a286e091907e01b8a0f31fd83fe77131c3270baa8f 
+
+запомните - это пригодиться нам в будущем для добавления нод воркеров.
+
+5. Сконфигурируем kubectl. Выплнять из под целевого для управления пользователя:
+mkdir -p $HOME/.kube
+sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+6. Проверим информацию кластера:
+kubectl cluster-info 
+
+#5. Install and Configure the Network Plugin
+Выполняется на master-ноде
+
+Установим плагин network
+1. Скачаем манифест:
+wget https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+
+
+3. Применяем наш манифест 
+$ kubectl apply -f kube-flannel.yml
+namespace/kube-flannel created
+clusterrole.rbac.authorization.k8s.io/flannel created
+clusterrolebinding.rbac.authorization.k8s.io/flannel created
+serviceaccount/flannel created
+configmap/kube-flannel-cfg created
+daemonset.apps/kube-flannel-ds created
+
+4. Проверяем работу пода flannel
+$ kubectl get pods -n kube-flannel
+NAME                    READY   STATUS    RESTARTS   AGE
+kube-flannel-ds-w2gbk   1/1     Running   0          103s
+
+
+5. Проверяем, что наша мастер нода запущена:
+$ kubectl get nodes -o wide
+NAME        STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION   CONTAINER-RUNTIME
+main-core   Ready    control-plane   19m   v1.28.2   172.22.1.94   <none>        Debian GNU/Linux 12 (bookworm)   6.1.0-13-amd64   docker://24.0.7
+
+#6. Add worker nodes to the Cluster
+1. Если у вас кластер состоит из нескольких нод, то добавьте их таким образом. На каждой ноде нужно выполнить данную команду:
+sudo kubeadm join 172.22.1.12:6443 --token f0pj7p.sz449hol1o1ycs7y \
+	--discovery-token-ca-cert-hash sha256:fea5cc967114667a7c501a12a6f9b6244c9ff87c052d41c9989570b08724bc72
+
+2. Проверим, что все ноды работают:
+$ kubectl get nodes -o wide
+NAME             STATUS   ROLES           AGE    VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION   CONTAINER-RUNTIME
+node-master      Ready    control-plane   105m   v1.28.2   172.22.1.12   <none>        Debian GNU/Linux 12 (bookworm)   6.1.0-13-amd64   containerd://1.6.25
+node-worker-01   Ready    <none>          29m    v1.28.2   172.22.1.14   <none>        Debian GNU/Linux 12 (bookworm)   6.1.0-13-amd64   containerd://1.6.25
+node-worker-02   Ready    <none>          28m    v1.28.2   172.22.1.15   <none>        Debian GNU/Linux 12 (bookworm)   6.1.0-13-amd64   containerd://1.6.25
+
+#7. Using Kubernetes Cluster
+Выполняется на master-ноде
+
+1. попробуем протестировать наш кластер и добавим тестовый под:
+kubectl apply -f https://k8s.io/examples/pods/commands.yaml
+
+2. проверим работу тестового пода
+$ kubectl get pods
+NAME           READY   STATUS      RESTARTS   AGE
+command-demo   0/1     Completed   0          8s
+
+
+
+8# Установка Metrics Server на Kubernetes Cluster
+Выполняется на master-ноде
+
+1. Скачиванием манифест файл:
+wget https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml -O metrics-server-components.yaml
+
+2. Применяем настройки:
+kubectl apply -f metrics-server-components.yaml
+
+3. Проверяем настройку Metrics server
+kubectl get deployment metrics-server -n kube-system
+
+Если долгое время под не загружется
+
+$ kubectl get deployment metrics-server -n kube-system
+NAME             READY   UP-TO-DATE   AVAILABLE   AGE
+metrics-server   0/1     1            0           3m3s
+
+А в логах подобная ошибка:
+$ kubectl logs metrics-server-fbb469ccc-ldc2b -n kube-system
+
+E1205 08:47:15.952300       1 scraper.go:140] "Failed to scrape node" err="Get \"https://172.22.1.14:10250/metrics/resource\": x509: cannot validate certificate for 172.22.1.14 because it doesn't contain any IP SANs" node="node-worker-01"
+
+Можно попробовать исправить ситуацию следуюбщим образом:
+1. На мастере:
+kubectl -n kube-system edit configmap kubelet-config 
+
+2. Добавить serverTLSBootstrap: true в секцию kubelet:
+3. На каждой ноде
+sudo nano /var/lib/kubelet/config.yaml
+
+Добавить вниз serverTLSBootstrap: true
+
+4. На мастере выполнить 
+sudo systemctl restart kubelet 
+for kubeletcsr in `kubectl -n kube-system get csr | grep kubernetes.io/kubelet-serving | awk '{ print $1 }'`; do kubectl certificate approve $kubeletcsr; done
+
+5. Проверка:
+kubectl logs -f -n kube-system `kubectl get pods -n kube-system | grep metrics-server | awk '{ print $1 }'`
+kubectl top pods --all-namespaces
+
+
+
+9# Ставим dash-board Kuber
+Все действия выполняем на местере.
+
+1. Для удобства поставим helm
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+sudo apt-get install apt-transport-https --yes
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update
+sudo apt-get install helm
+
+2. Скачиваем дистриб используя helm.
+helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kubernetes-dashboard
+
+
+3. Убеждаемся, что под задеплоин:
+$ kubectl get pods -n kubernetes-dashboard
+NAME                                    READY   STATUS    RESTARTS   AGE
+kubernetes-dashboard-798dd48467-jzq8x   1/1     Running   0          3h50m
+
+
+
+
+10# Создаем доступ к дашборду
+
+1. clusterIP заменить на NodePort
+kubectl patch svc -n kubernetes-dashboard kubernetes-dashboard -p '{"spec": {"type": "NodePort"}}'
+
+2. Создать файл
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin
+  namespace: kubernetes-dashboard
+
+3. Применить его
+kubectl apply -f dashboard.yml
+
+4. Получить токен входа в web UI
+kubectl -n kubernetes-dashboard create token admin-user
+
+
+
+11# Установка графаны и прометеус на кубер
+
+
+1. Скачиваем из гит исходники:
+git clone https://github.com/prometheus-operator/kube-prometheus.git && cd kube-prometheus
+
+2. Применяем конфиг файл
+kubectl create -f manifests/setup
+kubectl create -f manifests/
+
+3. Проверяем, что у нас все применилось, рзвернулось и запустилось
+смотрим ns:
+$ kubectl get ns monitoring
+NAME         STATUS   AGE
+monitoring   Active   2m41s
+ 
+смотрим состояние подов:
+$ kubectl get pods -n monitoring -w
+NAME                                   READY   STATUS    RESTARTS        AGE
+alertmanager-main-0                    2/2     Running   0               3m8s
+alertmanager-main-1                    2/2     Running   1 (2m55s ago)   3m8s
+alertmanager-main-2                    2/2     Running   1 (2m40s ago)   3m8s
+blackbox-exporter-69684688c9-nk66w     3/3     Running   0               6m47s
+grafana-7bf8dc45db-q2ndq               1/1     Running   0               6m47s
+kube-state-metrics-d75597b45-d9bhk     3/3     Running   0               6m47s
+node-exporter-2jzcv                    2/2     Running   0               6m47s
+node-exporter-5k8pk                    2/2     Running   0               6m47s
+node-exporter-9852n                    2/2     Running   0               6m47s
+node-exporter-f5dmp                    2/2     Running   0               6m47s
+prometheus-adapter-5f68766c85-hjcz9    1/1     Running   0               6m46s
+prometheus-adapter-5f68766c85-shjbz    1/1     Running   0               6m46s
+prometheus-k8s-0                       2/2     Running   0               3m7s
+prometheus-k8s-1                       2/2     Running   0               3m7s
+prometheus-operator-748bb6fccf-b5ppx   2/2     Running   0               6m46s
+обратите внимание на неймспейс monitoring
+
+смотрим состоние сервисов
+$ kubectl get svc -n monitoring
+NAME                    TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+alertmanager-main       ClusterIP   10.100.171.41    <none>        9093/TCP,8080/TCP            7m2s
+alertmanager-operated   ClusterIP   None             <none>        9093/TCP,9094/TCP,9094/UDP   3m23s
+blackbox-exporter       ClusterIP   10.108.187.73    <none>        9115/TCP,19115/TCP           7m2s
+grafana                 ClusterIP   10.97.236.243    <none>        3000/TCP                     7m2s
+kube-state-metrics      ClusterIP   None             <none>        8443/TCP,9443/TCP            7m2s
+node-exporter           ClusterIP   None             <none>        9100/TCP                     7m2s
+prometheus-adapter      ClusterIP   10.109.119.234   <none>        443/TCP                      7m1s
+prometheus-k8s          ClusterIP   10.101.253.211   <none>        9090/TCP,8080/TCP            7m1s
+prometheus-operated     ClusterIP   None             <none>        9090/TCP                     3m22s
+prometheus-operator     ClusterIP   None             <none> 
+
+
+4. Доступ к Prometeus and grafana из вне
+Если используете LoadBalancer
+
+Патчим сервисы:
+kubectl --namespace monitoring patch svc prometheus-k8s -p '{"spec": {"type": "LoadBalancer"}}'
+kubectl --namespace monitoring patch svc alertmanager-main -p '{"spec": {"type": "LoadBalancer"}}'
+kubectl --namespace monitoring patch svc grafana -p '{"spec": {"type": "LoadBalancer"}}'
+
+Убеждаемся, что все ок
+$ kubectl -n monitoring get svc  | grep NodePort
+alertmanager-main       NodePort    10.254.220.101   <none>        9093:31237/TCP               45m
+grafana                 NodePort    10.254.226.247   <none>        3000:31123/TCP               45m
+prometheus-k8s          NodePort    10.254.92.43     <none>        9090:32627/TCP               45m
+
+$ kubectl -n monitoring get svc  | grep LoadBalancer
+grafana                 LoadBalancer   10.97.236.243    192.168.1.31   3000:30513/TCP               11m
+
+
+
+
+#12 Настройка MetalLB Load Balancer.
+1. Убедитесь, что ваш Kubernetes Cluster API жив и вы можете использовать инструмент командной строки для администрирования кластера kubectl:
+
+$ kubectl cluster-info
+Kubernetes control plane is running at https://k8sapi.example.com:6443
+CoreDNS is running at https://k8sapi.example.com:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+2. Устновим сопутствующие пакеы
+sudo apt update && sudo apt install wget curl -y
+
+3. Возмем тег последнего релиза MetalLB
+MetalLB_RTAG=$(curl -s https://api.github.com/repos/metallb/metallb/releases/latest|grep tag_name|cut -d '"' -f 4|sed 's/v//')
+
+4. Проверим последний релиз командой:
+echo $MetalLB_RTAG
+
+5. Создадим директорию для MetalLB
+mkdir ~/metallb && cd ~/metallb
+
+6. Скачаем инстраляционный манифест
+wget https://raw.githubusercontent.com/metallb/metallb/v$MetalLB_RTAG/config/manifests/metallb-native.yaml
+
+7. Установим MetalLB в наш кубер в пространство имен metallb-system:
+$ kubectl apply -f metallb-native.yaml
+namespace/metallb-system created
+customresourcedefinition.apiextensions.k8s.io/addresspools.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/bfdprofiles.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/bgpadvertisements.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/bgppeers.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/communities.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/ipaddresspools.metallb.io created
+customresourcedefinition.apiextensions.k8s.io/l2advertisements.metallb.io created
+serviceaccount/controller created
+serviceaccount/speaker created
+Warning: policy/v1beta1 PodSecurityPolicy is deprecated in v1.21+, unavailable in v1.25+
+podsecuritypolicy.policy/controller created
+podsecuritypolicy.policy/speaker created
+role.rbac.authorization.k8s.io/controller created
+role.rbac.authorization.k8s.io/pod-lister created
+clusterrole.rbac.authorization.k8s.io/metallb-system:controller created
+clusterrole.rbac.authorization.k8s.io/metallb-system:speaker created
+rolebinding.rbac.authorization.k8s.io/controller created
+rolebinding.rbac.authorization.k8s.io/pod-lister created
+clusterrolebinding.rbac.authorization.k8s.io/metallb-system:controller created
+clusterrolebinding.rbac.authorization.k8s.io/metallb-system:speaker created
+secret/webhook-server-cert created
+service/webhook-service created
+deployment.apps/controller created
+daemonset.apps/speaker created
+validatingwebhookconfiguration.admissionregistration.k8s.io/metallb-webhook-configuration created
+
+
+8. Убедимся, что все поды запустились
+$ kubectl get pods  -n metallb-system
+NAME                              READY   STATUS    RESTARTS   AGE
+pod/controller-5bd9496b89-fkgwc   1/1     Running   0          7m25s
+pod/speaker-58282                 1/1     Running   0          7m25s
+pod/speaker-bwzfz                 1/1     Running   0          7m25s
+pod/speaker-q78r9                 1/1     Running   0          7m25s
+pod/speaker-vv6nr                 1/1     Running   0          7m25s
+
+
+9. Полный отчет о сервисах и подах 
+$ kubectl get all  -n metallb-system
+NAME                              READY   STATUS    RESTARTS   AGE
+pod/controller-5bd9496b89-fkgwc   1/1     Running   0          7m25s
+pod/speaker-58282                 1/1     Running   0          7m25s
+pod/speaker-bwzfz                 1/1     Running   0          7m25s
+pod/speaker-q78r9                 1/1     Running   0          7m25s
+pod/speaker-vv6nr                 1/1     Running   0          7m25s
+
+NAME                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/webhook-service   ClusterIP   10.98.112.134   <none>        443/TCP   7m25s
+
+NAME                     DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+daemonset.apps/speaker   4         4         4       4            4           kubernetes.io/os=linux   7m25s
+
+NAME                         READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/controller   1/1     1            1           7m25s
+
+NAME                                    DESIRED   CURRENT   READY   AGE
+replicaset.apps/controller-5bd9496b89   1         1         1       7m25s
+
+
+10. Создадим и объявим пул адресов для сервиса MetalLB
+
+$ vim ~/metallb/ipaddress_pools.yaml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: production
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.22.1.100-172.22.1.150 #Введите пул адресов, который будет находиться в вашей подсети.
+
+# Диапазон можно указать разными способами:
+#  - 192.168.1.0/24
+#  - 172.20.20.30-172.20.20.50
+#  - fc00:f853:0ccd:e799::/124
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advert
+  namespace: metallb-system
+
+12. Применим нашу созданную конфигурацию:
+$ kubectl apply -f  ~/metallb/ipaddress_pools.yaml
+ipaddresspool.metallb.io/production created
+l2advertisement.metallb.io/l2-advert created
+
+
+13. Список созданных пулов IP-адресов и объявлений:
+
+$ kubectl get ipaddresspools.metallb.io -n metallb-system
+NAME         AGE
+production   23s
+
+$ kubectl get l2advertisements.metallb.io -n metallb-system
+NAME        AGE
+l2-advert   49s
+
+
+
+Получим больше детальной информации:
+kubectl describe ipaddresspools.metallb.io production -n metallb-system
+Name:         production
+Namespace:    metallb-system
+Labels:       <none>
+Annotations:  <none>
+API Version:  metallb.io/v1beta1
+Kind:         IPAddressPool
+Metadata:
+  Creation Timestamp:  2023-11-09T12:01:44Z
+  Generation:          1
+  Resource Version:    5640
+  UID:                 20d8ae5f-31e9-4928-b617-1457cf72e79e
+Spec:
+  Addresses:
+    172.22.1.100-172.22.1.150
+  Auto Assign:       true
+  Avoid Buggy I Ps:  false
+Events:              <none>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#13 Install Wiki.js
+helm repo add requarks https://charts.js.wiki
+helm install my-release requarks/wiki
+
+
+https://docs.docker.com/engine/install/debian/
+https://computingforgeeks.com/install-kubernetes-cluster-on-debian-12-bookworm/
+https://computingforgeeks.com/how-to-deploy-metrics-server-to-kubernetes-cluster/
+https://github.com/kubernetes-sigs/metrics-server/issues/196
+https://computingforgeeks.com/how-to-install-kubernetes-dashboard-with-nodeport/
+https://www.thegeekdiary.com/how-to-access-kubernetes-dashboard-externally/
+https://kubernetes.github.io/ingress-nginx/deploy/
+https://cloud.vk.com/blog/balansirovka-i-masshtabirovanie-soedinenij-v-kubernetes
+https://habr.com/ru/companies/X5Tech/articles/645651/
+https://computingforgeeks.com/deploy-metallb-load-balancer-on-kubernetes/
+
+
+
+#Настройка Терраформ
+
+
+sudo apt update
+sudo apt install git golang-go
+git clone https://github.com/hashicorp/terraform.git
+cd ./terraform*
+
+go install
+По умолчанию собранное приложение появляется в т.н. $GOPATH. Переместим в '/usr/local/bin/':
+sudo mv ~/go/bin/terraform /usr/local/bin
+Для проверки достаточно выполнить в терминале команду 'terraform -help':
+
+
+wget https://github.com/dmacvicar/terraform-provider-libvirt/releases/download/v0.6.1/terraform-provider-libvirt-0.6.1+git.1578064534.db13b678.Ubuntu_18.04.amd64.tar.gz
+
+
+mkdir ~/terraform && cd ~/terraform
+$ terraform init
+Terraform initialized in an empty directory!
+
+curl -s https://api.github.com/repos/dmacvicar/terraform-provider-libvirt/releases/latest \
+  | grep browser_download_url \
+  | grep linux_amd64.zip \
+  | cut -d '"' -f 4 \
+  | wget -i -
+
+unzip terraform-provider-libvirt_*_linux_amd64.zip && rm -f terraform-provider-libvirt_*_linux_amd64.zip
+
+mkdir -p ~/.terraform.d/plugins/
+mv terraform-provider-libvirt_* ~/.terraform.d/plugins/terraform-provider-libvirt
+
+Download rancher.io/local-path storage class:
+
+
+wiki
+https://docs.requarks.io/install/kubernetes
+
+helm repo add requarks https://charts.js.wiki
+helm install wiki requarks/wiki
+
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+kubectl get storageclass
+kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+for delete 
+helm delete wiki
+kubectl delete pvc/data-wiki-postgresql-0
+
+
+
+#Установка Ansible
+
+1. Задаем имя дистриьба
+DISTR_CODENAME=jammy
+
+2. Добавляем ключ
+wget -O- "https://keyserver.ubuntu.com/pks/lookup?fingerprint=on&op=get&search=0x6125E2A8C77F2818FB7BD15B93C4A3FD7BB9C367" | sudo gpg --dearmour -o /usr/share/keyrings/ansible-archive-keyring.gpg
+
+3. добавляем репозиторий
+echo "deb [signed-by=/usr/share/keyrings/ansible-archive-keyring.gpg] http://ppa.launchpad.net/ansible/ansible/ubuntu $DISTR_CODENAME main" | sudo tee /etc/apt/sources.list.d/ansible.list
+
+4. Обновляем кеш репозиториев и устанавливаем пакет
+sudo apt update && sudo apt install ansible
+
+5. Готово
+
+
+Настройка и подключение серверов с помощью ансибла
+Создадим и настроим простой плейбук по добавлению ключей на 3 сервера
+
+0. Сгенерим  пару ключей:
+ssh-keygen -t ed25519 -o -a 100 && ssh-keygen -t rsa -b 4096 -o -a 100
+
+1. Структура нашей роли будет такая:
+
+.
+├── group_vars
+│   └── all.yml
+├── host_vars
+├── inventories
+│   └── inventory
+├── add_key_playbook.yml.yml
+└── roles
+    └── add_user
+        ├── defaults
+        ├── files
+        ├── handlers
+        ├── library
+        ├── meta
+        ├── tasks
+        │   └── main.yml
+        ├── templates
+        └── vars
+
+
+2. Создам папки:
+mkdir -p {group_vars,host_vars,inventories,roles} && mkdir -p roles/add_key/{defaults,files,handlers,library,meta,tasks,templates,vars
+}
+
+3. в roles/add_key/tasks создадим файл main.yml:
+---
+- name: create SSH key for tech_user in ~user/.ssh/id_rsa
+  user:
+    name: {{ user }}
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+- name: add authorized key from file id_rsa.pub
+  authorized_key:
+    user: {{ user }}
+    state: present
+    key: "{{ lookup('file', '/home/{{ user }}/.ssh/id_rsa.pub') }}"
+
+
+3. создать файл group_vars/all.yml
+---
+user: max
+
+4. Создать файл плейбук: add_key_playbook.yml
+---
+- hosts: kuber
+  become: true
+  roles:
+    - add_key
+
+5. файл inventories/inventory:
+[kuber]
+node-master ansible_host=172.22.1.12
+node-worker-01 ansible_host=172.22.1.14
+node-worker-02 ansible_host=172.22.1.15
+
+[monitoring]
+monitoring ansible_host=172.22.1.17
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+
+6. Создаем файл с паролем от от пользователя для прохождения судо:
+echo "you_pass" > pass
+
+6. Запускаем:
+ansible-playbook add_key_playbook.yml -u max -k --become-password-file pass 
+
+Получаем такой вот вывод:
+
+SSH password: 
+[WARNING]: Found both group and host with same name: monitoring
+
+PLAY [kuber] *************************************************************************************************************************************************************************************
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************************************
+ok: [node-worker-01]
+ok: [node-worker-02]
+ok: [node-master]
+
+TASK [add_key : create SSH key for tech_user in ~user/.ssh/id_rsa] *******************************************************************************************************************************
+changed: [node-worker-01]
+changed: [node-worker-02]
+changed: [node-master]
+
+TASK [add_key : add authorized key from file id_rsa.pub] *****************************************************************************************************************************************
+changed: [node-worker-01]
+changed: [node-worker-02]
+changed: [node-master]
+
+PLAY RECAP ***************************************************************************************************************************************************************************************
+node-master                : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+node-worker-01             : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+node-worker-02             : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+
+max@main-core:~/devops/ansible$ ssh max@172.22.1.12
+Enter passphrase for key '/home/max/.ssh/id_rsa': 
+Linux node-master 6.1.0-13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.55-1 (2023-09-29) x86_64
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Wed Dec 25 02:47:37 2024 from 172.22.1.11
+
+Поздраляю)
+
+
+
+
+#prometheus
+Сейчас у меня отдельная виртуальная машина для настрийки на ней системы мониторинга.
+Есть два варианта: скачивать с сайта бинаник, создавать вручную службу, пользователя и т д и использовать скрипт установки. Мы будем использовать второй ваиант.
+0. Нам понадобиться установить Git и nano (вместо nano можно юзать любой другой вам любимый редактор, к примеру vi, vim или mcedit). Я использую систему Debian, потому будем юзать apt.
+sudo apt update && sudo apt install git nano
+
+1. Склонируем себе репу 
+git clone https://github.com/error0x1/devops.git && cd ./devops/prometheus
+
+2. Отредактируем некоторые параметры:
+nano install_prometheus_server_ubuntu.sh 
+тут:
+PROMETHEUS_VERSION="3.0.1"                      # Ставим актуальную версию или оставляем текущую, если идете четко по инструкции.
+PROMETHEUS_FOLDER_CONFIG="/etc/prometheus"      # Место, где будут лежать конфигурационные файлы.
+PROMETHEUS_FOLDER_TSDATA="/opt/prometheus/data" # Место, где будет лежать бд с собраной информацией.
+
+3. Дадим права на запускк и запустим установку:
+chmod +x ./* && sudo ./install_prometheus_server_ubuntu.sh 
+
+Вывод будет примерно таким 
+$ sudo ./install_prometheus_server_ubuntu.sh 
+[sudo] пароль для user: 
+--2024-12-24 00:11:55--  https://github.com/prometheus/prometheus/releases/download/v3.0.1/prometheus-3.0.1.linux-amd64.tar.gz
+Распознаётся github.com (github.com)… 140.82.121.4
+Подключение к github.com (github.com)|140.82.121.4|:443... соединение установлено.
+HTTP-запрос отправлен. Ожидание ответа… 302 Found
+Адрес: https://objects.githubusercontent.com/github-production-release-asset-2e65be/6838921/d29591b9-3d89-4c1b-85d3-0c4c38069329?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=releaseassetproduction%2F20241223%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20241223T211154Z&X-Amz-Expires=300&X-Amz-Signature=11e6bc563af5539efedc5b2d45c1c88cd83f192667a7907d12c3af3dfc107e35&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3Dprometheus-3.0.1.linux-amd64.tar.gz&response-content-type=application%2Foctet-stream [переход]
+--2024-12-24 00:11:54--  https://objects.githubusercontent.com/github-production-release-asset-2e65be/6838921/d29591b9-3d89-4c1b-85d3-0c4c38069329?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=releaseassetproduction%2F209241223%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20241223T211154Z&X-Amz-Expires=300&X-Amz-Signature=11e6bc563af5539ejfedc5b2d45c1c88cd83f192667a7907d12c3af3dfc107e35&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3Dprometheus-3.0.1.linux-amd64.tar.gz&response-content-type=application%2Foctet-stream
+Распознаётся objects.githubusercontent.com (objects.githubusercontent.com)… 185.199.111.13, 185.199.108.13, 185.199.110.13, ...
+Подключение к objects.githubusercontent.com (objects.githubusercontent.com)|185.199.111.13|:443... соединение установлено.
+HTTP-запрос отправлен. Ожидание ответа… 200 OK
+Длина: 112995464 (108M) [application/octet-stream]
+Сохранение в: «prometheus-3.0.1.linux-amd64.tar.gz»
+
+prometheus-3.0.1.linux-amd64.tar.gz              100%[========================================================================================================>] 107,76M  3,89MB/s    за 29s     
+
+2024-12-24 00:12:24 (3,72 MB/s) - «prometheus-3.0.1.linux-amd64.tar.gz» сохранён [112995464/112995464]
+
+prometheus-3.0.1.linux-amd64/
+prometheus-3.0.1.linux-amd64/promtool
+prometheus-3.0.1.linux-amd64/LICENSE
+prometheus-3.0.1.linux-amd64/prometheus
+prometheus-3.0.1.linux-amd64/prometheus.yml
+prometheus-3.0.1.linux-amd64/NOTICE
+useradd: пользователь «prometheus» уже существует
+● prometheus.service - Prometheus Server
+     Loaded: loaded (/etc/systemd/system/prometheus.service; enabled; preset: enabled)
+     Active: active (running) since Tue 2024-12-24 00:01:42 MSK; 10min ago
+   Main PID: 410 (prometheus)
+      Tasks: 8 (limit: 2278)
+     Memory: 93.8M
+        CPU: 867ms
+     CGroup: /system.slice/prometheus.service
+             └─410 /usr/bin/prometheus --config.file /etc/prometheus/prometheus.yml --storage.tsdb.path /opt/prometheus/data
+....
+
+4. Отредактируем конфиг:
+sudo nano /etc/prometheus/prometheus.yml
+и приведем его к виду: 
+
+global:
+  scrape_interval: 15s # как часто опрашивать
+
+# мониторинг самого себя
+scrape_configs:
+  - job_name      : "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# у меня есть три виртуальные машины с кубером, его и будем опрашивать
+  - job_name      : "kubernetes"
+    static_configs:
+      - targets:
+          - 172.22.1.12:9100
+          - 172.22.1.14:9100
+          - 172.22.1.15:9100
+
+
+5. Перезапустим, что бы наши новые настройки применились:
+sudo systemctl restart prometheus.service 
+
+6. В браузере открываем страницу http://172.22.1.16:9090/targets  (в моем случае адрес моего прометеуса 172.22.1.16)
+Можо увидеть, что будут три ошибки наподобие Error scraping target: Get "http://172.22.1.15:9100/metrics": dial tcp 172.22.1.15:9100: connect: connection refused, т к нодэкспортер на самих вм еще не настроены.
+
+7. Переходим к настройке node exporter. В академических целях я не буду испоьзовать Ansible, по этому шаги ниже выполняем на каждой ноде по очереди)
+
+8. Склонируем себе репу 
+git clone https://github.com/error0x1/devops.git && cd ./devops/prometheus
+
+9. поправим версию, если необходимо:
+nano ./install_prometheus_node_exporter.sh
+
+NODE_EXPORTER_VERSION="1.8.2" #ставим актуальную версию или оставляем текущую, если идете четко по инструкции
+
+10. Запустим скрипт на установку:
+sudo ./install_prometheus_node_exporter.sh
+
+11. Проерим, что все работает. Перейдем по адресу http://172.22.1.12:9100/. Можно щелкнуть Metrics и увидеть кучу метрик.
+
+
+
+
+
+
+3. в roles/node_exporter/tasks создадим файл main.yml:
+---
+- name: add node_exporter
+  git:
+    repo: https://github.com/error0x1/devops.git
+    dest: /home/max/
+    clone: yes
+    update: yes
+- name: run instalation node_expoerer
+  shell: |
+    cd ./devops/prometheus && chmod +x *.sh && sudo ./devops/install_prometheus_node_exporter.sh
+
+
+
+
+
+
+
+
+Продолжаем настраивать 
