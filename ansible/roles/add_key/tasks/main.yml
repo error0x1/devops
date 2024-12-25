@@ -1,0 +1,12 @@
+---
+- name: create SSH key for tech_user in ~user/.ssh/id_rsa
+  user:
+    name: "{{ user }}"
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+- name: add authorized key from file id_rsa.pub
+  authorized_key:
+    user: "{{ user }}"
+    state: present
+    key: "{{ lookup('file', '/home/{{ user }}/.ssh/id_rsa.pub') }}"
