@@ -1,0 +1,14 @@
+---
+- name: add node_exporter
+  git:
+    repo: https://github.com/error0x1/devops.git
+    dest: /tmp/ansible/
+    clone: yes
+    update: yes
+- name: run instalation node_expoerer
+  shell: |
+    cd /tmp/ansible/prometheus/
+  shell: |
+    chmod +x *.sh
+  shell: |
+    sudo /tmp/ansible/prometheus/install_prometheus_node_exporter.sh
