@@ -1,5 +1,5 @@
 ---
-- hosts: monitoring
+- hosts: monitoring_new
   become: true
   roles:
     - install_prometheus.yml
