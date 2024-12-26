@@ -8,7 +8,9 @@
 NODE_EXPORTER_VERSION="1.8.2"
 
 cd /tmp
-wget https://github.com/prometheus/node_exporter/releases/download/v$NODE_EXPORTER_VERSIN/node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz
+wget https://github.com/prometheus/node_exporter/releases/download/v$NODE_EXPORTER_VERSION/node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz
+     https://github.com/prometheus/node_exporter/releases/download/v                     /node_exporter-1.8.2%0D              .linux-amd64.tar.gz%0D
+
 tar xvfz node_exporter-$NODE_EXPORTER_VERSION.linux-amd64.tar.gz
 cd node_exporter-$NODE_EXPORTER_VERSION.linux-amd64
 

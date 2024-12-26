@@ -47,7 +47,7 @@
     label: "{{ item.path }}"
 
 - name: Run installation of node_exporter
-  shell: sh "{{ work_dir }}/install_prometheus_node_exporter.sh"
+  shell: "/bin/sh {{ work_dir }}/install_prometheus_node_exporter.sh"
   args:
     executable: /bin/bash
   when: "'{{ work_dir }}/install_prometheus_node_exporter.sh' in (script_files.files | map(attribute='path') | list)"
