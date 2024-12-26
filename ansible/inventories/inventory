@@ -4,7 +4,7 @@ node-worker-01 ansible_host=172.22.1.14
 node-worker-02 ansible_host=172.22.1.15
 
 [monitoring]
-monitoring ansible_host=172.22.1.17
+monitoring ansible_host=172.22.1.16
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3

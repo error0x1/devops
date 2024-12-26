@@ -1,2 +1,4 @@
 ---
 user: max
+tmp: /tmp/ansible
+work_dir: "{{ tmp }}/prometheus"
