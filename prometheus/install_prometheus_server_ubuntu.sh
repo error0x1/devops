@@ -8,13 +8,13 @@ PROMETHEUS_VERSION="3.0.1"
 PROMETHEUS_FOLDER_CONFIG="/etc/prometheus"
 PROMETHEUS_FOLDER_TSDATA="/opt/prometheus/data"
 
-cd /tmp
+cd /tmp/ansible
 wget https://github.com/prometheus/prometheus/releases/download/v$PROMETHEUS_VERSION/prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz
 tar xvfz prometheus-$PROMETHEUS_VERSION.linux-amd64.tar.gz
 cd prometheus-$PROMETHEUS_VERSION.linux-amd64
 
 mv prometheus /usr/bin/
-rm -rf /tmp/prometheus*
+rm -rf /tmp/ansible/prometheus*
 
 mkdir -p $PROMETHEUS_FOLDER_CONFIG
 mkdir -p $PROMETHEUS_FOLDER_TSDATA
@@ -28,6 +28,13 @@ scrape_configs:
   - job_name      : "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name      : "kubernetes"
+    static_configs:
+      - targets:
+          - 172.22.1.12:9100
+          - 172.22.1.14:9100
+          - 172.22.1.15:9100
 EOF
 
 useradd -rs /bin/false prometheus
