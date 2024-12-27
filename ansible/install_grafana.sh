@@ -1,5 +1,5 @@
 ---
-- hosts: monitoring_new
+- hosts: monitoring
   become: true
   roles:
     - install_grafana
