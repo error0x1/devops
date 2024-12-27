@@ -1,0 +1,53 @@
+---
+- name: Clear temporary directory
+  shell: rm -rf "{{ tmp }}"
+
+- name: Git clone node_exporter
+  git:
+    repo: https://github.com/error0x1/devops.git
+    dest: "{{ tmp }}"
+    clone: yes
+    update: yes
+
+- name: Check files from "{{ tmp }}"
+  shell: ls -l "{{ tmp }}"
+  register: tmp_files
+  ignore_errors: yes
+
+- name: Debug - show contents of tmp directory
+  debug:
+    msg: "{{ tmp_files.stdout }}"
+
+- name: Check files from "{{ work_dir }}"
+  shell: ls -l "{{ work_dir }}"
+  register: work_dir_files
+  ignore_errors: yes
+
+- name: Debug - show contents of work directory
+  debug:
+    msg: "{{ work_dir_files.stdout }}"
+
+- name: Check if script files exist in tmp
+  find:
+    paths: "{{ work_dir }}"
+    patterns: "*.sh"
+  register: script_files
+
+- name: Debug - show found script files
+  debug:
+    msg: "{{ script_files.files }}"
+
+- name: Make scripts executable
+  file:
+    path: "{{ item.path }}"
+    mode: '0755'
+    state: file
+  loop: "{{ script_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Run installation of node_exporter
+  shell: "/bin/sh {{ work_dir }}/install_grafana_server_ubuntu.sh"
+  args:
+    executable: /bin/bash
+  when: "'{{ work_dir }}/install_grafana_server_ubuntu.sh' in (script_files.files | map(attribute='path') | list)"

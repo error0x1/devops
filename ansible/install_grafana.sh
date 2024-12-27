@@ -2,4 +2,4 @@
 - hosts: monitoring_new
   become: true
   roles:
-    - install_prometheus
+    - install_grafana
