@@ -46,7 +46,7 @@
   loop_control:
     label: "{{ item.path }}"
 
-- name: Run installation of node_exporter
+- name: Run installation of Grafana
   shell: "/bin/sh {{ work_dir }}/install_grafana_server_ubuntu.sh"
   args:
     executable: /bin/bash
