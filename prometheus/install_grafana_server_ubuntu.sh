@@ -7,7 +7,7 @@
 # https://grafana.com/grafana/download
 GRAFANA_VERSION="11.4.0"
 PROMETHEUS_URL="http://172.22.1.16:9090"
-
+#
 
 apt-get install -y apt-transport-https software-properties-common wget
 mkdir -p /etc/apt/keyrings/
