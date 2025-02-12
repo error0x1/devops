@@ -1,0 +1,8 @@
+Разберем установку Docker и Docker Compose на Debian 12.
+
+Обновите систему
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
