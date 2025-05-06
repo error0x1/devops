@@ -110,13 +110,16 @@
 
 1. Ставим Docker. Добавляем репу Docker и ключ:
     ```bash
-    OS=Debian_11
-    CRIO_VERSION=1.27
-    echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /"|sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
-    echo "deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$CRIO_VERSION/$OS/ /"|sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION.list
-    curl -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key | sudo apt-key add -
-    curl -L https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/Release.key | sudo apt-key add -
-    sudo apt-get update
+    OS=Debian_12
+    CRIO_VERSION=v1.32
+    cat <<EOF | tee /etc/yum.repos.d/cri-o.repo
+    [cri-o]
+    name=CRI-O
+    baseurl=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/$CRIO_VERSION/rpm/
+    enabled=1
+    gpgcheck=1
+    gpgkey=https://download.opensuse.org/repositories/isv:/cri-o:/stable:/$CRIO_VERSION/rpm/repodata/repomd.xml.key
+    EOF
     ```
 
 2. Установка Docker:
