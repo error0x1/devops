@@ -75,15 +75,12 @@
 
 1. Добавление репозитория Kubernetes. Импортируем ключ:
     ```bash
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmour -o /etc/apt/trusted.gpg.d/cgoogle.gpg
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     ```
 
 2. Добавляем репозиторий:
     ```bash
-    sudo tee /etc/apt/sources.list.d/kubernetes.list<<EOF
-    deb http://apt.kubernetes.io/ kubernetes-xenial main
-    # deb-src http://apt.kubernetes.io/ kubernetes-xenial main
-    EOF
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
     ```
 
 3. Обновляем пакетную базу:
